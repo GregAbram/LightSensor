@@ -1,0 +1,54 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Test1 (pick board)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/Test1.py",
+            "args": ["${input:boardIndex}"],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Test3 (all boards)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/Test3.py",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "jig (all sensors)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/jig.py",
+            "args": ["${input:period}"],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "manager",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/manager.py",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal"
+        }
+    ],
+    "inputs": [
+        {
+            "id": "boardIndex",
+            "type": "pickString",
+            "description": "Which board to test",
+            "options": ["0", "1", "2"],
+            "default": "0"
+        },
+        {
+            "id": "period",
+            "type": "promptString",
+            "description": "Sampling period in seconds",
+            "default": "0.1"
+        }
+    ]
+}
