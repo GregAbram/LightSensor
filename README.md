@@ -19,6 +19,13 @@ Board N's sensor k is bit `N * 2 + k` of the sensor value.
 Build for **XIAO_ESP32C3** with **USB CDC On Boot: Enabled**, or nothing
 reaches the Serial Monitor.
 
+`detector3` is set up for battery life: an 80 MHz CPU, a reading every 50 ms
+with the CPU idle in between, 0 dBm transmit power, slow advertising, and a
+request for a 60-120 ms connection interval with slave latency. The constants
+are together near the top of the sketch. The stock Arduino core is built
+without light sleep or Bluetooth modem sleep, so the board can't sleep while
+connected; that would take a custom build of the core.
+
 ## Host programs
 
 Run them with the venv's Python (`venv/bin/python`, which has `bleak`; see

@@ -54,6 +54,28 @@ const int DEFAULT_GAP = 10;
 const int SAMPLES = 8;                 // averaged per reading, to steady the value
 const unsigned long ACK_TIMEOUT_MS = 2000;
 
+// Battery life. This core is built without light sleep or Bluetooth modem
+// sleep, so the savings come from idling between readings, a slower CPU, less
+// transmit power and less radio traffic. BLE needs at least 80 MHz.
+const uint32_t CPU_MHZ = 80;
+const unsigned long POLL_MS = 30;      // between readings: the slowest response to light
+const esp_power_level_t TX_POWER = ESP_PWR_LVL_N0;   // 0 dBm, down from +9; raise it if a board drops out
+
+// While waiting for a connection: 546.25 ms, in 0.625 ms units. A reconnect
+// takes up to about this much longer. An interval Apple recommends.
+const uint16_t ADV_INTERVAL = 874;
+
+// Once connected, asked of the host, which may decline. Intervals are in
+// 1.25 ms units, so 60-120 ms. A state change goes out at the next connection
+// event, within one interval; latency only lets the board skip events when it
+// has nothing to send, so a reply to it can take up to 5 intervals (600 ms).
+// That's well within ACK_TIMEOUT_MS. The timeout is in 10 ms units: 4 s.
+const uint16_t CONN_INTERVAL_MIN = 48;
+const uint16_t CONN_INTERVAL_MAX = 96;
+const uint16_t CONN_LATENCY = 4;
+const uint16_t CONN_TIMEOUT = 400;
+const unsigned long CONN_PARAMS_DELAY_MS = 2000;   // let the host finish setting up first
+
 int threshold = DEFAULT_THRESHOLD;
 int gap = DEFAULT_GAP;
 bool lit[NUM_SENSORS] = {false, false};
@@ -171,6 +193,7 @@ void handleCommand(String cmd) {
 }
 
 void setup() {
+  setCpuFrequencyMhz(CPU_MHZ);
   Serial.begin(115200);
   Serial.setTimeout(20);
   analogReadResolution(12);
@@ -184,6 +207,7 @@ void setup() {
   updateSensors();
 
   BLEDevice::init(DEVICE_NAME);
+  BLEDevice::setPower(TX_POWER);
   pServer = BLEDevice::createServer();
   pServer->setCallbacks(new ServerCallbacks());
 
@@ -205,6 +229,8 @@ void setup() {
   BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
   pAdvertising->addServiceUUID(SERVICE_UUID);
   pAdvertising->setScanResponse(true);
+  pAdvertising->setMinInterval(ADV_INTERVAL);
+  pAdvertising->setMaxInterval(ADV_INTERVAL);
   BLEDevice::startAdvertising();
 
   Serial.print(DEVICE_NAME);
@@ -224,10 +250,19 @@ void loop() {
   }
 
   static bool wasConnected = false;
+  static unsigned long connectedAt = 0;
+  static bool paramsRequested = false;
   if (deviceConnected && !wasConnected) {
     sendState();  // resync a freshly connected central with the full current state
+    connectedAt = millis();
+    paramsRequested = false;
   }
   wasConnected = deviceConnected;
+
+  if (deviceConnected && !paramsRequested && millis() - connectedAt > CONN_PARAMS_DELAY_MS) {
+    pServer->updateConnParams(pServer->getConnId(), CONN_INTERVAL_MIN, CONN_INTERVAL_MAX, CONN_LATENCY, CONN_TIMEOUT);
+    paramsRequested = true;
+  }
 
   if (updateSensors()) {
     sendState();
@@ -237,4 +272,6 @@ void loop() {
     Serial.println("No ack — resending");
     sendState();
   }
+
+  delay(POLL_MS);  // the CPU idles here, instead of reading the sensors flat out
 }
