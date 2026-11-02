@@ -1,14 +1,17 @@
 """Drives the wall from the light sensors.
 
-Connects to every board over BLE, keeps the latest state of all 6 sensors, and
-sends them to DisplayCluster as one sensor value (bit N * 2 + k = board N's
-sensor k) with PUT /sensors. DisplayCluster shows and hides the windows itself,
-from each window's sensorMask and showWhenLit (see make-test-layout.py), so
-there's no config.json and one request per change, however many windows.
+Connects to every board over BLE and keeps the latest state of all 6 sensors.
+Each sensor's bit in the value sent to DisplayCluster (bit N * 2 + k = board N's
+sensor k, with PUT /sensors) toggles each time that sensor goes from dark to lit,
+and stays put in between. DisplayCluster shows and hides the windows itself, from
+each window's sensorMask and sensorPattern (see make-demo-layout.py), so there's
+no config.json and one request per change, however many windows.
 
-Needs a DisplayCluster with sensor support (GET/PUT /sensors). Setting the
+Needs a DisplayCluster with sensorPattern (GET/PUT /sensors). Setting the
 sensors needs no control of the wall, so this runs alongside the web UI.
-A board that disconnects has its sensors reported dark until it's back.
+It starts from the bits the wall has, so a restart leaves the images as they are.
+A board that disconnects keeps its bits as they are, and counts as dark, so a
+sensor that's lit when its board reconnects counts as going from dark to lit.
 
 Usage: python manager.py
 """
@@ -34,6 +37,9 @@ SENSORS_PER_BOARD = 2
 NUM_SENSORS = len(DEVICE_NAMES) * SENSORS_PER_BOARD
 # the bits this program owns; any others on the wall are left alone
 ALL_SENSORS_MASK = (1 << NUM_SENSORS) - 1
+
+PREV_SENSORS = 0
+PREV_MASK = 0
 
 # The wall's DisplayCluster serves HTTPS with a certificate for this name only,
 # so connect by this name and trust that certificate (copied from the wall host).
@@ -96,22 +102,32 @@ def sensor_value():
    """sensor_state as the wall's sensor value; unknown sensors count as dark."""
    return sum(1 << i for i, lit in enumerate(sensor_state) if lit)
 
-async def sender():
+def logic(sensorValue):
+    global PREV_SENSORS
+    global PREV_MASK
+
+    rising = (PREV_SENSORS ^ sensorValue) & sensorValue & ALL_SENSORS_MASK
+    next_mask = PREV_MASK ^ rising
+    PREV_SENSORS = sensorValue
+    PREV_MASK = next_mask
+    return next_mask
+
+
+async def sender(sent):
    """Sends the sensor value whenever it changes, one request at a time. Changes
    that arrive while a request is in flight are folded into the next one, so a
-   burst never queues up behind a slow network."""
-   sent = None
+   burst never queues up behind a slow network. sent is the value the wall has now."""
    while True:
       await changed.wait()
       changed.clear()
-      value = sensor_value()
-      if value == sent:
+      mask = logic(sensor_value())
+      if mask == sent:
          continue
       start = time.perf_counter()
       try:
-         await asyncio.to_thread(wall.set_sensors, value)
-         sent = value
-         print(f"wall {value:0{NUM_SENSORS}b} ({(time.perf_counter() - start) * 1000:.0f} ms)")
+         await asyncio.to_thread(wall.set_sensors, mask)
+         sent = mask
+         print(f"wall {mask:0{NUM_SENSORS}b} ({(time.perf_counter() - start) * 1000:.0f} ms)")
       except Exception as e:
          print(f"wall error: {e}; retrying in 1s")
          await asyncio.sleep(1)
@@ -187,9 +203,10 @@ async def main():
    except RuntimeError as e:
       raise SystemExit(f"{e}\nThe wall's DisplayCluster needs sensor support (GET/PUT /sensors).")
    print(f"Connected; wall sensor value is {value['value']:0{NUM_SENSORS}b}")
-   # start from all dark, until the boards report in
-   changed.set()
-   await asyncio.gather(sender(), *(device_loop(i) for i in range(len(DEVICE_NAMES))))
+   # carry on from the bits the wall has, so a restart doesn't change the images
+   global PREV_MASK
+   PREV_MASK = value['value'] & ALL_SENSORS_MASK
+   await asyncio.gather(sender(PREV_MASK), *(device_loop(i) for i in range(len(DEVICE_NAMES))))
 
 if __name__ == "__main__":
    try:

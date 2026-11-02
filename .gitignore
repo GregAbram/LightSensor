@@ -5,3 +5,4 @@ __pycache__/
 # written by make-test-layout.py; regenerate rather than edit
 /lights.dcx
 /config.json
+/demo/

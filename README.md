@@ -2,8 +2,8 @@
 
 Flashlight-controlled content on a DisplayCluster wall. Three Seeed XIAO
 ESP32-C3 boards each read two light sensors and report them over BLE; a host
-program combines the six into one sensor value and sends it to DisplayCluster
-(`PUT /sensors`), which shows a window when `(value & sensorMask) ==
+program toggles a bit for each sensor each time it's lit, and sends the six bits
+as one sensor value to DisplayCluster (`PUT /sensors`), which shows a window when `(value & sensorMask) ==
 sensorPattern`. Needs a DisplayCluster with `sensorPattern` (TACC/DisplayCluster).
 
 Board N's sensor k is bit `N * 2 + k` of the sensor value.
@@ -35,11 +35,12 @@ a time.
 
 | Program | |
 |---|---|
-| `manager.py` | Drives the wall: all three boards over BLE, one `PUT /sensors` per change to rattler-dev. |
+| `manager.py` | Drives the wall: all three boards over BLE, one `PUT /sensors` per change to rattler-dev. Each sensor's bit toggles when the sensor goes from dark to lit. |
 | `jig.py [period]` | Test jig: samples all six sensors and prints them as true/false when they change. No DisplayCluster. |
 | `Test1.py [board]`, `Test3.py` | BLE testers for one board, or all three. |
 | `tune.py <board> [T<n>] [G<n>]` | Reads or sets a board's threshold and gap over BLE. |
 | `make-test-layout.py` | Writes `lights.dcx`, a red/green test layout with a cell per sensor; copy it to `~/.displaycluster/states` on the wall. `CONTENT_DIR` picks where the images are (default `/home/gda/Content`; `content/` here has them). |
+| `make-demo-layout.py [out-dir]` | Writes `sensor-demo.dcx` and its placeholder images (default `demo/`): the wall in thirds, with four images per third, one for each combination of that board's two sensors. Each image shows its mask and pattern. Copy the images to `~/Content/sensor-demo` and the `.dcx` to `~/.displaycluster/states` on the wall; `CONTENT_DIR` changes where it looks for the images. |
 | `sensors-test.py` | Checks DisplayCluster's sensor support through its API, without boards. |
 | `DC.py` | DisplayCluster's Python client, from the `sensors` branch. |
 
