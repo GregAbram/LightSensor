@@ -8,7 +8,7 @@ sensor is lit, red when it's dark. Everything starts dark (red showing).
 
 Board b's sensor s is config.json column b * SENSORS_PER_BOARD + s, the same
 numbering manager.py uses. It's also bit b * SENSORS_PER_BOARD + s of the
-wall's sensor value: each window's <sensorMask> and <showWhenLit> let a
+wall's sensor value: each window's <sensorMask> and <sensorPattern> let a
 DisplayCluster with sensor support switch them itself (older versions ignore
 them and use config.json via manager.py).
 
@@ -36,7 +36,7 @@ GAP_Y = 0.02
 
 state_file = sys.argv[1] if len(sys.argv) > 1 else 'lights.dcx'
 
-def content_window(uri, name, x, y, w, h, hidden, sensor_mask, show_when_lit):
+def content_window(uri, name, x, y, w, h, hidden, sensor_mask, sensor_pattern):
    return f""" <ContentWindow>
   <URI>{escape(uri)}</URI>
   <name>{escape(name)}</name>
@@ -50,7 +50,7 @@ def content_window(uri, name, x, y, w, h, hidden, sensor_mask, show_when_lit):
   <selected>0</selected>
   <hidden>{1 if hidden else 0}</hidden>
   <sensorMask>{sensor_mask}</sensorMask>
-  <showWhenLit>{1 if show_when_lit else 0}</showWhenLit>
+  <sensorPattern>{sensor_pattern}</sensorPattern>
  </ContentWindow>
 """
 
@@ -66,8 +66,8 @@ for b in range(NUM_BOARDS):
       h = cell_h - GAP_Y
       red, green = f'b{b}s{s}-red', f'b{b}s{s}-green'
       bit = 1 << (b * SENSORS_PER_BOARD + s)
-      windows.append(content_window(RED, red, x, y, w, h, hidden=False, sensor_mask=bit, show_when_lit=False))
-      windows.append(content_window(GREEN, green, x, y, w, h, hidden=True, sensor_mask=bit, show_when_lit=True))
+      windows.append(content_window(RED, red, x, y, w, h, hidden=False, sensor_mask=bit, sensor_pattern=0))
+      windows.append(content_window(GREEN, green, x, y, w, h, hidden=True, sensor_mask=bit, sensor_pattern=bit))
       # manager.py shows an entry when (flag == 1) == lit
       config.append([[red, 0], [green, 1]])
 

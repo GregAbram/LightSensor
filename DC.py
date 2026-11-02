@@ -8,10 +8,15 @@ import urllib.error
 import urllib.parse
 from time import sleep
 
-# Client for DisplayCluster's remote-control HTTP API (see the README's
-# "Remote control API" section). Windows are identified by name - by default
-# the path of the file they show, with #2, #3, ... appended when that file is
-# already open. Coordinates are in tile units.
+# Client for DisplayCluster's remote-control HTTP API (see "Scripting with
+# DC.py" in doc/remote-control.md). Needs only the standard library: copy this
+# file anywhere, or put the repo's python/ directory on PYTHONPATH.
+#
+# Windows are identified by name - by default the path of the file they show,
+# with #2, #3, ... appended when that file is already open. File paths are as
+# the wall's machines see them, not the machine the script runs on.
+# Coordinates are in tile units: (0, 0) is the wall's top-left corner and
+# (tilesWide, tilesHigh) its bottom-right; fractions are fine.
 
 class DCError(Exception):
     def __init__(self, status, message):
@@ -99,8 +104,10 @@ class DC:
         if change and not self.lease and not self.takeControl():
             return None
         status, reply = self._send(method, path, body)
-        if status == 423 and change and reply.get('controller') is None:
-            # our control lapsed and nobody else has it: take it back and retry
+        # our control lapsed (not taken back at the control window) and nobody
+        # else has it: take it back and retry. A wall older than 'lapsed' only
+        # says that nobody has it.
+        if status == 423 and change and reply.get('lapsed', reply.get('controller') is None):
             self.lease = None
             if not self.takeControl():
                 return None
@@ -143,7 +150,8 @@ class DC:
         for w in windows or []:
             self.content[w['name']] = { 'uri': w['uri'], 'x': w['x'], 'y': w['y'], 'w': w['w'], 'h': w['h'], 'hidden': w['hidden'],
                                         'filled': w.get('filled', False),
-                                        'sensorMask': w.get('sensorMask', 0), 'showWhenLit': w.get('showWhenLit', True) }
+                                        'sensorMask': w.get('sensorMask', 0), 'sensorPattern': w.get('sensorPattern', 0),
+                                        'zoom': w.get('zoom', 1.0), 'centerX': w.get('centerX', 0.5), 'centerY': w.get('centerY', 0.5) }
 
     def getConfiguration(self):
         config = self._request('GET', '/config')
@@ -157,15 +165,15 @@ class DC:
 
     # returns the new window's name - the file's path unless name is given (or
     # the file is already open, in which case #2, #3, ... is appended).
-    # sensorMask and showWhenLit put it under sensor control (see setSensorControl)
-    def open(self, uri, x = 0, y = 0, w = 1, h = 1, name = None, sensorMask = None, showWhenLit = None):
+    # sensorMask and sensorPattern put it under sensor control (see setSensorControl)
+    def open(self, uri, x = 0, y = 0, w = 1, h = 1, name = None, sensorMask = None, sensorPattern = None):
         params = { 'uri': uri, 'x': x, 'y': y, 'w': w, 'h': h }
         if name:
             params['name'] = name
         if sensorMask is not None:
             params['sensorMask'] = int(sensorMask)
-        if showWhenLit is not None:
-            params['showWhenLit'] = bool(showWhenLit)
+        if sensorPattern is not None:
+            params['sensorPattern'] = int(sensorPattern)
         window = self._request('POST', '/windows', params, change = True)
         self.updateContent()
         return window['name'] if window else None
@@ -180,6 +188,15 @@ class DC:
         self._request('PATCH', self._window_path(name), { 'filled': bool(on) }, change = True)
         self.updateContent()
 
+    # the view of a window's content: zoom 1 shows all of it, 2 half of it
+    # across, and so on; centerX and centerY are the point of the content at
+    # the middle of the window, as fractions of its width and height. Any left
+    # out keeps its current value
+    def zoom(self, name, zoom = None, centerX = None, centerY = None):
+        params = { k: v for k, v in (('zoom', zoom), ('centerX', centerX), ('centerY', centerY)) if v is not None }
+        self._request('PATCH', self._window_path(name), params, change = True)
+        self.updateContent()
+
     def hide(self, name):
         self._request('PATCH', self._window_path(name), { 'hidden': True }, change = True)
         self.updateContent()
@@ -188,12 +205,17 @@ class DC:
         self._request('PATCH', self._window_path(name), { 'hidden': False }, change = True)
         self.updateContent()
 
-    # puts the window under sensor control: bit i of sensorMask is sensor i. It
-    # shows when any of those sensors is lit if showWhenLit, or when none is
-    # if not; sensorMask 0 takes it out of sensor control
-    def setSensorControl(self, name, sensorMask, showWhenLit = True):
-        self._request('PATCH', self._window_path(name), { 'sensorMask': int(sensorMask), 'showWhenLit': bool(showWhenLit) }, change = True)
+    # puts the window under sensor control: bit i of each is sensor i. It shows
+    # when (sensor value & sensorMask) == sensorPattern; sensorMask 0 takes it
+    # out of sensor control
+    def setSensorControl(self, name, sensorMask, sensorPattern = 0):
+        self._request('PATCH', self._window_path(name), { 'sensorMask': int(sensorMask), 'sensorPattern': int(sensorPattern) }, change = True)
         self.updateContent()
+
+    # how many sensors the wall offers (its DISPLAYCLUSTER_SENSORS)
+    def getSensorCount(self):
+        config = self._request('GET', '/config')
+        return config.get('sensorCount', 0) if config else 0
 
     # the wall's sensor value: bit i set means sensor i is lit
     def getSensors(self):
@@ -252,6 +274,10 @@ class DC:
     def saveState(self, state):
         self._request('POST', '/state/save', { 'file': state })
 
+    # makes a folder (and any above it) in the wall's state directory
+    def makeStateFolder(self, folder):
+        self._request('POST', '/state/folder', { 'dir': folder })
+
     # any of the display options /options reports, e.g. setOptions(showTestPattern = True)
     def setOptions(self, **options):
         return self._request('PATCH', '/options', options, change = True)
@@ -296,6 +322,9 @@ class DC:
         self.updateContent()
         return result['opened'] if result else 0
 
+    # a timed script: a JSON file (or the list it holds) of windows to open
+    # and close, [{uri, open, close, x, y, w, h}, ...] with open and close in
+    # seconds from the start; returns the events in order, for run_events
     def create_event_list(self, script):
         if isinstance(script, str):
           with open(script) as f:
@@ -308,6 +337,8 @@ class DC:
             events.append(["close", content['close'], content])
         return sorted(events, key=lambda a: a[1])
 
+    # clears the wall, then opens and closes the windows on time; returns
+    # when the last event has happened
     def run_events(self, event_list):
         self.clear()
         now = 0

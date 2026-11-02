@@ -60,8 +60,8 @@ check(dc.getSensors() is not None, 'GET /sensors works')
 print('Layout')
 dc.loadState('lights.dcx')
 check(len(dc.content) == 2 * NUM_SENSORS, f'lights.dcx loaded {len(dc.content)} windows')
-masks = {n: (p['sensorMask'], p['showWhenLit']) for n, p in dc.content.items()}
-check(masks.get('b1s0-red') == (1 << 2, False) and masks.get('b1s0-green') == (1 << 2, True),
+masks = {n: (p['sensorMask'], p['sensorPattern']) for n, p in dc.content.items()}
+check(masks.get('b1s0-red') == (1 << 2, 0) and masks.get('b1s0-green') == (1 << 2, 1 << 2),
       f"b1s0 masks from the file: red {masks.get('b1s0-red')}, green {masks.get('b1s0-green')}")
 
 print('Following the sensors')
@@ -93,7 +93,7 @@ dc.setSensors(0b100000)
 dc.updateContent()
 check(dc.content['b2s1-green']['hidden'] == before, 'mask 0: b2s1-green ignores sensor 5')
 check(dc.content['b2s1-red']['hidden'], 'b2s1-red still follows (hidden while lit)')
-dc.setSensorControl('b2s1-green', 1 << 5, True)
+dc.setSensorControl('b2s1-green', 1 << 5, 1 << 5)
 check_follows(dc, 0b100000, 'mask restored: follows again straight away')
 
 print('Saving and reloading state')
@@ -103,7 +103,7 @@ dc.clear()
 check(len(dc.content) == 0, 'cleared the wall')
 dc.setSensors(0b000110)
 dc.loadState(TEST_STATE)
-masks2 = {n: (p['sensorMask'], p['showWhenLit']) for n, p in dc.content.items()}
+masks2 = {n: (p['sensorMask'], p['sensorPattern']) for n, p in dc.content.items()}
 check(masks2 == masks, 'masks survived save/load')
 check_follows(dc, 0b000110, 'reloaded windows follow the current value, not the saved one')
 

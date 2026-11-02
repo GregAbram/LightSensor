@@ -3,8 +3,8 @@
 Flashlight-controlled content on a DisplayCluster wall. Three Seeed XIAO
 ESP32-C3 boards each read two light sensors and report them over BLE; a host
 program combines the six into one sensor value and sends it to DisplayCluster
-(`PUT /sensors`), which shows and hides windows by their `sensorMask` and
-`showWhenLit`. Needs DisplayCluster's `sensors` branch (TACC/DisplayCluster).
+(`PUT /sensors`), which shows a window when `(value & sensorMask) ==
+sensorPattern`. Needs a DisplayCluster with `sensorPattern` (TACC/DisplayCluster).
 
 Board N's sensor k is bit `N * 2 + k` of the sensor value.
 
