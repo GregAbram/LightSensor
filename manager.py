@@ -38,6 +38,8 @@ NUM_SENSORS = len(DEVICE_NAMES) * SENSORS_PER_BOARD
 # the bits this program owns; any others on the wall are left alone
 ALL_SENSORS_MASK = (1 << NUM_SENSORS) - 1
 
+# What logic() remembers between calls: the sensors' lit bits last time, and the
+# toggled bits last sent to the wall (set from the wall's own value at startup)
 PREV_SENSORS = 0
 PREV_MASK = 0
 
@@ -99,14 +101,21 @@ changed = asyncio.Event()
 scan_lock = asyncio.Lock()
 
 def sensor_value():
-   """sensor_state as the wall's sensor value; unknown sensors count as dark."""
+   """sensor_state as one bit per sensor, set if lit; unknown sensors count as
+   dark. logic() turns this into the wall's sensor value."""
    return sum(1 << i for i, lit in enumerate(sensor_state) if lit)
 
 def logic(sensorValue):
+    """Returns the value for the wall, given the sensors' lit bits: each bit
+    flips when its sensor goes from dark to lit, and otherwise stays as it was,
+    so a window's image stays up after the flashlight has gone. Calling it again
+    with the same bits changes nothing, so a failed send can simply retry."""
     global PREV_SENSORS
     global PREV_MASK
 
+    # bits that changed and are now set: the sensors that just went dark to lit
     rising = (PREV_SENSORS ^ sensorValue) & sensorValue & ALL_SENSORS_MASK
+    # flip those bits and leave the rest
     next_mask = PREV_MASK ^ rising
     PREV_SENSORS = sensorValue
     PREV_MASK = next_mask
@@ -114,9 +123,10 @@ def logic(sensorValue):
 
 
 async def sender(sent):
-   """Sends the sensor value whenever it changes, one request at a time. Changes
+   """Sends the toggled value whenever it changes, one request at a time. Changes
    that arrive while a request is in flight are folded into the next one, so a
-   burst never queues up behind a slow network. sent is the value the wall has now."""
+   burst never queues up behind a slow network; a sensor that goes lit and dark
+   again in that time doesn't toggle. sent is the value the wall has now."""
    while True:
       await changed.wait()
       changed.clear()

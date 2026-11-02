@@ -3,8 +3,9 @@
 Flashlight-controlled content on a DisplayCluster wall. Three Seeed XIAO
 ESP32-C3 boards each read two light sensors and report them over BLE; a host
 program toggles a bit for each sensor each time it's lit, and sends the six bits
-as one sensor value to DisplayCluster (`PUT /sensors`), which shows a window when `(value & sensorMask) ==
-sensorPattern`. Needs a DisplayCluster with `sensorPattern` (TACC/DisplayCluster).
+as one sensor value to DisplayCluster (`PUT /sensors`), which shows a window
+when `(value & sensorMask) == sensorPattern`. Needs a DisplayCluster with
+`sensorPattern` (TACC/DisplayCluster).
 
 Board N's sensor k is bit `N * 2 + k` of the sensor value.
 
@@ -42,12 +43,35 @@ a time.
 | `make-test-layout.py` | Writes `lights.dcx`, a red/green test layout with a cell per sensor; copy it to `~/.displaycluster/states` on the wall. `CONTENT_DIR` picks where the images are (default `/home/gda/Content`; `content/` here has them). |
 | `make-demo-layout.py [out-dir]` | Writes `sensor-demo.dcx` and its placeholder images (default `demo/`): the wall in thirds, with four images per third, one for each combination of that board's two sensors. Each image shows its mask and pattern. Copy the images to `~/Content/sensor-demo` and the `.dcx` to `~/.displaycluster/states` on the wall; `CONTENT_DIR` changes where it looks for the images. |
 | `sensors-test.py` | Checks DisplayCluster's sensor support through its API, without boards. |
-| `DC.py` | DisplayCluster's Python client, from the `sensors` branch. |
+| `DC.py` | A copy of DisplayCluster's Python client. |
 
 `.vscode/launch.json` has debug configurations for the BLE programs.
 
 The wall connection uses rattler-dev's certificate and token in
 `~/.displaycluster/rattler-dev_cert.pem` and `rattler-dev_token`.
+
+### How `manager.py` sets the bits
+
+The boards report whether each sensor is lit, but the wall isn't sent that. Each
+sensor has a bit that flips when the sensor goes from dark to lit and otherwise
+stays as it is. A hit with the flashlight changes the image, and the image stays
+up after the flashlight has gone. With two sensors picking from four images, each
+hit moves one step around `00`, `01`, `11`, `10`, and the opposite image takes two
+hits.
+
+- **Starting up:** it starts from the value the wall already has, so restarting
+  `manager.py` leaves the images as they are. To start over, send the wall 0
+  (`~/bin/sensors` on rattler-dev) or restart DisplayCluster, which clears the
+  value. After restarting DisplayCluster, restart `manager.py` too, or it keeps
+  the old bits and sends them with the next hit.
+- **Disconnects:** a board that drops out keeps its bits. It counts as dark
+  meanwhile, so a sensor that's lit when its board reconnects, or when
+  `manager.py` starts, counts as a hit.
+- **Bounce:** a flicker across the threshold counts as another hit and leaves the
+  wrong image up, and nothing in `manager.py` filters it out. If that happens,
+  widen the gap with `tune.py`.
+- **Very quick hits:** the boards read every 50 ms, and a sensor that goes lit and
+  dark again while a request is in flight (about 80 ms) doesn't toggle.
 
 ## `old/`
 
