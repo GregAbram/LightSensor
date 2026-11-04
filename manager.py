@@ -13,13 +13,20 @@ It starts from the bits the wall has, so a restart leaves the images as they are
 A board that disconnects keeps its bits as they are, and counts as dark, so a
 sensor that's lit when its board reconnects counts as going from dark to lit.
 
-Usage: python manager.py
+Given a logic file, that file turns the sensors into the wall's value instead
+(make-sensor-layout.py writes one to go with its state file). It provides
+SENSOR_MASK, the bits it owns; start(value), which takes up the wall's value at
+startup and returns its own; and logic(sensor_value), as logic() here.
+
+Usage: python manager.py [logic.py]
 """
 import asyncio
 import http.client
+import importlib.util
 import json
 import os
 import ssl
+import sys
 import time
 from bleak import BleakClient, BleakScanner
 
@@ -35,8 +42,8 @@ DEVICE_NAMES = [
 ]
 SENSORS_PER_BOARD = 2
 NUM_SENSORS = len(DEVICE_NAMES) * SENSORS_PER_BOARD
-# the bits this program owns; any others on the wall are left alone
-ALL_SENSORS_MASK = (1 << NUM_SENSORS) - 1
+# the bits the built-in logic owns; any others on the wall are left alone
+SENSOR_MASK = (1 << NUM_SENSORS) - 1
 
 # What logic() remembers between calls: the sensors' lit bits last time, and the
 # toggled bits last sent to the wall (set from the wall's own value at startup)
@@ -86,7 +93,7 @@ class Wall:
                raise
 
    def set_sensors(self, value):
-      return self.request('PUT', '/sensors', {'value': value, 'mask': ALL_SENSORS_MASK})['value']
+      return self.request('PUT', '/sensors', {'value': value, 'mask': LOGIC.SENSOR_MASK})['value']
 
 wall = Wall()
 
@@ -114,12 +121,30 @@ def logic(sensorValue):
     global PREV_MASK
 
     # bits that changed and are now set: the sensors that just went dark to lit
-    rising = (PREV_SENSORS ^ sensorValue) & sensorValue & ALL_SENSORS_MASK
+    rising = (PREV_SENSORS ^ sensorValue) & sensorValue & SENSOR_MASK
     # flip those bits and leave the rest
     next_mask = PREV_MASK ^ rising
     PREV_SENSORS = sensorValue
     PREV_MASK = next_mask
     return next_mask
+
+def start(value):
+    """Carries on from the bits the wall has, so a restart doesn't change the images."""
+    global PREV_MASK
+    PREV_MASK = value & SENSOR_MASK
+    return PREV_MASK
+
+def load_logic(path):
+   """The logic file at path as a module, or this file's own logic without one."""
+   if path is None:
+      return sys.modules[__name__]
+   spec = importlib.util.spec_from_file_location('wall_logic', path)
+   module = importlib.util.module_from_spec(spec)
+   spec.loader.exec_module(module)
+   return module
+
+LOGIC = load_logic(sys.argv[1] if len(sys.argv) > 1 else None)
+VALUE_BITS = LOGIC.SENSOR_MASK.bit_length()
 
 
 async def sender(sent):
@@ -130,14 +155,14 @@ async def sender(sent):
    while True:
       await changed.wait()
       changed.clear()
-      mask = logic(sensor_value())
+      mask = LOGIC.logic(sensor_value())
       if mask == sent:
          continue
-      start = time.perf_counter()
+      begin = time.perf_counter()
       try:
          await asyncio.to_thread(wall.set_sensors, mask)
          sent = mask
-         print(f"wall {mask:0{NUM_SENSORS}b} ({(time.perf_counter() - start) * 1000:.0f} ms)")
+         print(f"wall {mask:0{VALUE_BITS}b} ({(time.perf_counter() - begin) * 1000:.0f} ms)")
       except Exception as e:
          print(f"wall error: {e}; retrying in 1s")
          await asyncio.sleep(1)
@@ -212,11 +237,13 @@ async def main():
       value = await asyncio.to_thread(wall.request, 'GET', '/sensors')
    except RuntimeError as e:
       raise SystemExit(f"{e}\nThe wall's DisplayCluster needs sensor support (GET/PUT /sensors).")
-   print(f"Connected; wall sensor value is {value['value']:0{NUM_SENSORS}b}")
-   # carry on from the bits the wall has, so a restart doesn't change the images
-   global PREV_MASK
-   PREV_MASK = value['value'] & ALL_SENSORS_MASK
-   await asyncio.gather(sender(PREV_MASK), *(device_loop(i) for i in range(len(DEVICE_NAMES))))
+   print(f"Connected; wall sensor value is {value['value']:0{VALUE_BITS}b}")
+   # carry on from the bits the wall has, so a restart doesn't change the images;
+   # if the logic changes them (bits outside its range), the sender sends its own
+   sent = value['value'] & LOGIC.SENSOR_MASK
+   if LOGIC.start(value['value']) != sent:
+      changed.set()
+   await asyncio.gather(sender(sent), *(device_loop(i) for i in range(len(DEVICE_NAMES))))
 
 if __name__ == "__main__":
    try:
