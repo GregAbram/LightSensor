@@ -36,7 +36,7 @@ a time.
 
 | Program | |
 |---|---|
-| `manager.py [logic.py]` | Drives the wall: all three boards over BLE, one `PUT /sensors` per change to rattler-dev. Each sensor's bit toggles when the sensor goes from dark to lit, unless a logic file (from `make-sensor-layout.py`) says otherwise. |
+| `manager.py [logic.py] [options]` | Drives the wall: all three boards over BLE, one `PUT /sensors` per change. Each sensor's bit toggles when the sensor goes from dark to lit, unless a logic file (from `make-sensor-layout.py`) says otherwise. |
 | `jig.py [period]` | Test jig: samples all six sensors and prints them as true/false when they change. No DisplayCluster. |
 | `Test1.py [board]`, `Test3.py` | BLE testers for one board, or all three. |
 | `tune.py <board> [T<n>] [G<n>]` | Reads or sets a board's threshold and gap over BLE. |
@@ -48,8 +48,22 @@ a time.
 
 `.vscode/launch.json` has debug configurations for the BLE programs.
 
-The wall connection uses rattler-dev's certificate and token in
-`~/.displaycluster/rattler-dev_cert.pem` and `rattler-dev_token`.
+`manager.py` talks to DisplayCluster on `localhost:1910` by default, over plain
+HTTP with no token. A wall without a token takes that from its own machine, or
+from this one through an SSH tunnel:
+
+```
+ssh -N -L 1910:localhost:1910 stallion-manager.tacc.utexas.edu
+```
+
+`--host` and `--port` pick another wall, `--cert FILE` (a self-signed wall's
+certificate) or `--https` (a CA-signed one) switch to HTTPS, and `--token FILE`
+sends the wall's token. For rattler-dev:
+
+```
+venv/bin/python manager.py --host rattler-dev.tacc.utexas.edu \
+   --cert ~/.displaycluster/rattler-dev_cert.pem --token ~/.displaycluster/rattler-dev_token
+```
 
 ### How `manager.py` sets the bits
 

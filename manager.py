@@ -18,8 +18,19 @@ Given a logic file, that file turns the sensors into the wall's value instead
 SENSOR_MASK, the bits it owns; start(value), which takes up the wall's value at
 startup and returns its own; and logic(sensor_value), as logic() here.
 
-Usage: python manager.py [logic.py]
+It talks to DisplayCluster's API on localhost:1910 by default, over plain HTTP
+with no token: a wall with no token accepts that from its own machine, or
+through an SSH tunnel to it (ssh -N -L 1910:localhost:1910 wallhost).
+--cert and --https switch to HTTPS, and --token gives a file holding the
+wall's token. For rattler-dev:
+   python manager.py --host rattler-dev.tacc.utexas.edu \
+      --cert ~/.displaycluster/rattler-dev_cert.pem \
+      --token ~/.displaycluster/rattler-dev_token
+
+Usage: python manager.py [logic.py] [--host H] [--port P] [--cert FILE | --https] [--token FILE]
 """
+import argparse
+
 import asyncio
 import http.client
 import importlib.util
@@ -50,14 +61,22 @@ SENSOR_MASK = (1 << NUM_SENSORS) - 1
 PREV_SENSORS = 0
 PREV_MASK = 0
 
-# The wall's DisplayCluster serves HTTPS with a certificate for this name only,
-# so connect by this name and trust that certificate (copied from the wall host).
-DC_HOST = 'rattler-dev.tacc.utexas.edu'
-DC_PORT = 1910
-DC_CAFILE = os.path.expanduser('~/.displaycluster/rattler-dev_cert.pem')
-# rattler-dev's own token, kept apart from the default ~/.displaycluster/api_token
-with open(os.path.expanduser('~/.displaycluster/rattler-dev_token')) as f:
-   DC_TOKEN = f.read().strip()
+parser = argparse.ArgumentParser(description='Drives the wall from the light sensors.')
+parser.add_argument('logic', nargs='?', help='a logic file, e.g. one from make-sensor-layout.py')
+parser.add_argument('--host', default='localhost', help="the wall's DisplayCluster host (default localhost)")
+parser.add_argument('--port', type=int, default=1910, help='its API port (default 1910)')
+parser.add_argument('--cert', help="HTTPS, trusting this certificate (a self-signed wall's, copied from it); "
+                    'connect by the name the certificate is for')
+parser.add_argument('--https', action='store_true', help="HTTPS, trusting the system's certificate authorities")
+parser.add_argument('--token', help="a file holding the wall's API token (default: none)")
+ARGS = parser.parse_args()
+
+DC_HOST = ARGS.host
+DC_PORT = ARGS.port
+DC_TOKEN = None
+if ARGS.token:
+   with open(os.path.expanduser(ARGS.token)) as f:
+      DC_TOKEN = f.read().strip()
 
 class Wall:
    """PUT /sensors over one kept-open HTTPS connection: after the first
@@ -65,11 +84,13 @@ class Wall:
    handshake. Blocking, so it's called from a worker thread."""
 
    def __init__(self):
-      self.context = ssl.create_default_context(cafile=DC_CAFILE)
+      self.context = None
+      if ARGS.cert or ARGS.https:
+         self.context = ssl.create_default_context(cafile=os.path.expanduser(ARGS.cert) if ARGS.cert else None)
       self.conn = None
 
    def request(self, method, path, body=None):
-      headers = {'Authorization': 'Bearer ' + DC_TOKEN}
+      headers = {'Authorization': 'Bearer ' + DC_TOKEN} if DC_TOKEN else {}
       data = None
       if body is not None:
          data = json.dumps(body)
@@ -77,7 +98,10 @@ class Wall:
       # one retry on a fresh connection, for a kept-open one the server closed
       for attempt in (1, 2):
          if self.conn is None:
-            self.conn = http.client.HTTPSConnection(DC_HOST, DC_PORT, context=self.context, timeout=5)
+            if self.context:
+               self.conn = http.client.HTTPSConnection(DC_HOST, DC_PORT, context=self.context, timeout=5)
+            else:
+               self.conn = http.client.HTTPConnection(DC_HOST, DC_PORT, timeout=5)
          try:
             self.conn.request(method, path, body=data, headers=headers)
             response = self.conn.getresponse()
@@ -143,7 +167,7 @@ def load_logic(path):
    spec.loader.exec_module(module)
    return module
 
-LOGIC = load_logic(sys.argv[1] if len(sys.argv) > 1 else None)
+LOGIC = load_logic(ARGS.logic)
 VALUE_BITS = LOGIC.SENSOR_MASK.bit_length()
 
 
@@ -232,11 +256,15 @@ async def device_loop(index):
        await asyncio.sleep(3)
 
 async def main():
-   print(f"Connecting to {DC_HOST}")
+   scheme = 'https' if wall.context else 'http'
+   print(f"Connecting to {scheme}://{DC_HOST}:{DC_PORT}")
    try:
       value = await asyncio.to_thread(wall.request, 'GET', '/sensors')
    except RuntimeError as e:
-      raise SystemExit(f"{e}\nThe wall's DisplayCluster needs sensor support (GET/PUT /sensors).")
+      raise SystemExit(f"{e}\nThe wall's DisplayCluster needs sensor support (GET/PUT /sensors), "
+                       "and a token if it has one (--token).")
+   except (http.client.HTTPException, OSError) as e:
+      raise SystemExit(f"Can't reach {scheme}://{DC_HOST}:{DC_PORT}: {e}")
    print(f"Connected; wall sensor value is {value['value']:0{VALUE_BITS}b}")
    # carry on from the bits the wall has, so a restart doesn't change the images;
    # if the logic changes them (bits outside its range), the sender sends its own
