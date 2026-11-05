@@ -21,10 +21,14 @@ The logic file has manager.py move a column on to its next file, modulo its
 count, whenever either of its board's two sensors goes from dark to lit:
    python manager.py --logic OUT-logic.py
 
-The state file's URIs are the files' absolute paths here, or under --uri-root
-on the wall host (--uri-root /home/vislab/Content/show gives
-/home/vislab/Content/show/left/...). Copy the .dcx to ~/.displaycluster/states
-on the wall host, then load it. manager.py works whatever the wall's
+The state file names the files relative to its own folder (left/..., or
+../left/... if it's written elsewhere), which DisplayCluster resolves against
+the state file's folder when it loads it. By default it's written into the
+content directory, so the whole directory - state, logic file and content - can
+be copied to the wall's state directory (its content folder) as it is, and
+loaded from there: with the directory copied as IceGlass,
+   python manager.py --logic IceGlass/sensor-layout-logic.py --state IceGlass/sensor-layout.dcx
+Relative paths need a DisplayCluster from 6df8f30 (October 2026) on. manager.py works whatever the wall's
 DISPLAYCLUSTER_SENSORS is; it only sets how many bits the web UI shows controls
 for, so to flip all 3k from there, start the wall with it at least 3k.
 
@@ -32,9 +36,9 @@ Image sizes are read directly for PNG, JPEG, GIF and BMP, and with ffprobe for
 movies and other images. A file whose size can't be found fills its column, and
 DisplayCluster then fits it to its aspect ratio at the column's top left.
 
-Usage: python make-sensor-layout.py content-dir wall.json [out] [--uri-root DIR]
+Usage: python make-sensor-layout.py content-dir wall.json [out]
    wall.json   the wall's DisplayCluster configuration
-   out         writes out.dcx and out-logic.py (default sensor-layout)
+   out         writes out.dcx and out-logic.py (default content-dir/sensor-layout)
 """
 import argparse
 import json
@@ -216,9 +220,9 @@ def main():
    parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
    parser.add_argument('content_dir', help='holds the left, center and right directories')
    parser.add_argument('wall', help="the wall's DisplayCluster configuration (wall.json)")
-   parser.add_argument('out', nargs='?', default='sensor-layout', help='writes OUT.dcx and OUT-logic.py')
-   parser.add_argument('--uri-root', help='where content-dir is on the wall host, if not the same path')
+   parser.add_argument('out', nargs='?', help='writes OUT.dcx and OUT-logic.py (default content-dir/sensor-layout)')
    args = parser.parse_args()
+   out = args.out or os.path.join(args.content_dir, 'sensor-layout')
 
    wall_w, wall_h = wall_size(args.wall)
    files = [column_files(os.path.join(args.content_dir, c)) for c in COLUMNS]
@@ -231,7 +235,10 @@ def main():
       sys.exit(f'{max(counts)} files in a column needs {3 * k} sensor bits; the wall has 32')
    shifts = [2 * k, k, 0]
 
-   content_dir = os.path.abspath(args.content_dir)
+   # the files are named relative to the state file's folder
+   dcx = out + '.dcx'
+   logic = out + '-logic.py'
+   dcx_dir = os.path.dirname(os.path.abspath(dcx))
    windows = []
    for column, (name, paths) in enumerate(zip(COLUMNS, files)):
       mask = ((1 << k) - 1) << shifts[column]
@@ -239,16 +246,12 @@ def main():
          size = content_size(path)
          if size is None:
             print(f"can't find the size of {path}: it fills its column")
-         uri = os.path.abspath(path)
-         if args.uri_root:
-            uri = args.uri_root.rstrip('/') + '/' + os.path.relpath(uri, content_dir)
+         uri = os.path.relpath(os.path.abspath(path), dcx_dir)
          pattern = index << shifts[column]
          windows.append(content_window(uri, f'{name} {index} {os.path.basename(path)}',
                                        *placement(column, size, wall_w, wall_h),
                                        index != 0, mask, pattern))
 
-   dcx = args.out + '.dcx'
-   logic = args.out + '-logic.py'
    with open(dcx, 'w') as f:
       f.write('<!DOCTYPE state>\n<state>\n <version>1</version>\n')
       f.writelines(windows)
@@ -258,6 +261,9 @@ def main():
                                     k=k, counts=counts, shifts=shifts))
 
    print(f'wrote {dcx} ({len(windows)} windows) and {logic}')
+   if os.path.relpath(os.path.abspath(args.content_dir), dcx_dir).startswith('..'):
+      print(f'the files are named from outside {dcx_dir} (../...), so keep them in the same '
+            'place relative to the state file on the wall')
    print(f'k = {k}; files left, center, right = {counts[0]}, {counts[1]}, {counts[2]}')
    print(f'uses sensor bits 0-{3 * k - 1}; to see them in the web UI, start the wall '
          f'with DISPLAYCLUSTER_SENSORS={3 * k} or more (manager.py doesn\'t need it)')
