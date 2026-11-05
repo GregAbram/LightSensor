@@ -98,7 +98,7 @@ class Wall:
          self.context = ssl.create_default_context(cafile=os.path.expanduser(ARGS.cert) if ARGS.cert else None)
       self.conn = None
 
-   def request(self, method, path, body=None, lease=None):
+   def request(self, method, path, body=None, lease=None, timeout=5):
       headers = {'Authorization': 'Bearer ' + DC_TOKEN} if DC_TOKEN else {}
       if lease:
          headers['X-DC-Lease'] = lease
@@ -110,9 +110,12 @@ class Wall:
       for attempt in (1, 2):
          if self.conn is None:
             if self.context:
-               self.conn = http.client.HTTPSConnection(DC_HOST, DC_PORT, context=self.context, timeout=5)
+               self.conn = http.client.HTTPSConnection(DC_HOST, DC_PORT, context=self.context)
             else:
-               self.conn = http.client.HTTPConnection(DC_HOST, DC_PORT, timeout=5)
+               self.conn = http.client.HTTPConnection(DC_HOST, DC_PORT)
+         self.conn.timeout = timeout
+         if self.conn.sock:
+            self.conn.sock.settimeout(timeout)
          try:
             self.conn.request(method, path, body=data, headers=headers)
             response = self.conn.getresponse()
@@ -121,23 +124,29 @@ class Wall:
                message = reply.get('error') if isinstance(reply, dict) else None
                raise RuntimeError(f"{method} {path}: {message or response.reason} (HTTP {response.status})")
             return reply
-         except (http.client.HTTPException, OSError):
+         except (http.client.HTTPException, OSError) as e:
             self.conn.close()
             self.conn = None
-            if attempt == 2:
+            # a timeout means the wall got the request and is slow, so sending
+            # it again would only do it twice
+            if attempt == 2 or isinstance(e, TimeoutError):
                raise
 
    def load_state(self, file):
       """Takes control of the wall, loads a state file and gives control back.
-      Fails if someone else (the web UI, say) has control."""
+      Fails if someone else (the web UI, say) has control. The wall answers
+      once it has opened every file, which for big images can take a while."""
       lease = self.request('POST', '/control', {'label': 'manager.py'})['lease']
       try:
-         self.request('POST', '/state/load', {'file': file}, lease=lease)
+         self.request('POST', '/state/load', {'file': file}, lease=lease, timeout=LOAD_TIMEOUT)
       finally:
          self.request('DELETE', '/control', lease=lease)
 
    def set_sensors(self, value):
       return self.request('PUT', '/sensors', {'value': value, 'mask': LOGIC.SENSOR_MASK})['value']
+
+# seconds to wait for the wall to load a state file
+LOAD_TIMEOUT = 300
 
 wall = Wall()
 
@@ -286,11 +295,15 @@ async def main():
    except (http.client.HTTPException, OSError) as e:
       raise SystemExit(f"Can't reach {scheme}://{DC_HOST}:{DC_PORT}: {e}")
    if ARGS.state:
+      print(f"Loading {ARGS.state}...")
+      start = time.perf_counter()
       try:
          await asyncio.to_thread(wall.load_state, ARGS.state)
-      except RuntimeError as e:
+      except TimeoutError:
+         raise SystemExit(f"Couldn't load {ARGS.state}: the wall didn't finish within {LOAD_TIMEOUT} s")
+      except (RuntimeError, http.client.HTTPException, OSError) as e:
          raise SystemExit(f"Couldn't load {ARGS.state}: {e}")
-      print(f"Loaded {ARGS.state}")
+      print(f"Loaded {ARGS.state} ({time.perf_counter() - start:.1f} s)")
    print(f"Connected; wall sensor value is {value['value']:0{VALUE_BITS}b}")
    # carry on from the bits the wall has, so a restart doesn't change the images;
    # if the logic changes them (bits outside its range), the sender sends its own
