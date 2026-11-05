@@ -36,13 +36,13 @@ a time.
 
 | Program | |
 |---|---|
-| `manager.py [logic.py] [options]` | Drives the wall: all three boards over BLE, one `PUT /sensors` per change. Each sensor's bit toggles when the sensor goes from dark to lit, unless a logic file (from `make-sensor-layout.py`) says otherwise. |
+| `manager.py [options]` | Drives the wall: all three boards over BLE, one `PUT /sensors` per change. Each sensor's bit toggles when the sensor goes from dark to lit, unless a logic file (`--logic`, from `make-sensor-layout.py`) says otherwise. |
 | `jig.py [period]` | Test jig: samples all six sensors and prints them as true/false when they change. No DisplayCluster. |
 | `Test1.py [board]`, `Test3.py` | BLE testers for one board, or all three. |
 | `tune.py <board> [T<n>] [G<n>]` | Reads or sets a board's threshold and gap over BLE. |
 | `make-test-layout.py` | Writes `lights.dcx`, a red/green test layout with a cell per sensor; copy it to `~/.displaycluster/states` on the wall. `CONTENT_DIR` picks where the images are (default `/home/gda/Content`; `content/` here has them). |
 | `make-demo-layout.py [out-dir]` | Writes `sensor-demo.dcx` and its placeholder images (default `demo/`): the wall in thirds, with four images per third, one for each combination of that board's two sensors. Each image shows its mask and pattern. Copy the images to `~/Content/sensor-demo` and the `.dcx` to `~/.displaycluster/states` on the wall; `CONTENT_DIR` changes where it looks for the images. |
-| `make-sensor-layout.py content-dir wall.json [out] [--uri-root DIR]` | Writes `out.dcx` and `out-logic.py` for real content: the files in `content-dir`'s `left`, `center` and `right` directories, each fitted and centered in its third of the wall and stacked under sensor control. Run `manager.py out-logic.py`, and either sensor of a board moves its third on to its next file. |
+| `make-sensor-layout.py content-dir wall.json [out] [--uri-root DIR]` | Writes `out.dcx` and `out-logic.py` for real content: the files in `content-dir`'s `left`, `center` and `right` directories, each fitted and centered in its third of the wall and stacked under sensor control. Run `manager.py --logic out-logic.py`, and either sensor of a board moves its third on to its next file. |
 | `sensors-test.py` | Checks DisplayCluster's sensor support through its API, without boards. |
 | `DC.py` | A copy of DisplayCluster's Python client. |
 
@@ -56,7 +56,9 @@ from this one through an SSH tunnel:
 ssh -N -L 1910:localhost:1910 stallion-manager.tacc.utexas.edu
 ```
 
-`--host` and `--port` pick another wall, `--cert FILE` (a self-signed wall's
+`--state FILE` loads a state file from the wall's state directory before
+starting (`--state show.dcx`), taking control just for that; it fails if someone
+else, such as the web UI, has control. `--host` and `--port` pick another wall, `--cert FILE` (a self-signed wall's
 certificate) or `--https` (a CA-signed one) switch to HTTPS, and `--token FILE`
 sends the wall's token. For rattler-dev:
 

@@ -19,7 +19,7 @@ starts at 0, so each column starts with its first file (sorted by name).
 
 The logic file has manager.py move a column on to its next file, modulo its
 count, whenever either of its board's two sensors goes from dark to lit:
-   python manager.py OUT-logic.py
+   python manager.py --logic OUT-logic.py
 
 The state file's URIs are the files' absolute paths here, or under --uri-root
 on the wall host (--uri-root /home/vislab/Content/show gives
@@ -165,7 +165,7 @@ def content_window(uri, name, x, y, w, h, hidden, sensor_mask, sensor_pattern):
 """
 
 LOGIC_TEMPLATE = '''"""Sensor logic for {dcx}, written by make-sensor-layout.py: use it with
-   python manager.py {logic}
+   python manager.py --logic {logic}
 
 Each column of the wall shows one of its files, the one whose index is in its
 field of the sensor value. When either of a board's two sensors goes from dark

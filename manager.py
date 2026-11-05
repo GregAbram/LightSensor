@@ -13,7 +13,7 @@ It starts from the bits the wall has, so a restart leaves the images as they are
 A board that disconnects keeps its bits as they are, and counts as dark, so a
 sensor that's lit when its board reconnects counts as going from dark to lit.
 
-Given a logic file, that file turns the sensors into the wall's value instead
+Given a logic file (--logic), that file turns the sensors into the wall's value instead
 (make-sensor-layout.py writes one to go with its state file). It provides
 SENSOR_MASK, the bits it owns; start(value), which takes up the wall's value at
 startup and returns its own; and logic(sensor_value), as logic() here.
@@ -27,7 +27,10 @@ wall's token. For rattler-dev:
       --cert ~/.displaycluster/rattler-dev_cert.pem \
       --token ~/.displaycluster/rattler-dev_token
 
-Usage: python manager.py [logic.py] [--host H] [--port P] [--cert FILE | --https] [--token FILE]
+--state FILE loads a state file from the wall's state directory first (e.g.
+--state show.dcx), taking control of the wall just for that.
+
+Usage: python manager.py [--logic FILE] [--state FILE] [--host H] [--port P] [--cert FILE | --https] [--token FILE]
 """
 import argparse
 
@@ -62,7 +65,10 @@ PREV_SENSORS = 0
 PREV_MASK = 0
 
 parser = argparse.ArgumentParser(description='Drives the wall from the light sensors.')
-parser.add_argument('logic', nargs='?', help='a logic file, e.g. one from make-sensor-layout.py')
+parser.add_argument('--logic', help="a logic file, e.g. one from make-sensor-layout.py (default: toggle each sensor's bit)")
+# the logic file used to be the one positional argument; it still works that way
+parser.add_argument('logic_file', nargs='?', help=argparse.SUPPRESS)
+parser.add_argument('--state', help="a state file to load first, relative to the wall's state directory")
 parser.add_argument('--host', default='localhost', help="the wall's DisplayCluster host (default localhost)")
 parser.add_argument('--port', type=int, default=1910, help='its API port (default 1910)')
 parser.add_argument('--cert', help="HTTPS, trusting this certificate (a self-signed wall's, copied from it); "
@@ -70,6 +76,9 @@ parser.add_argument('--cert', help="HTTPS, trusting this certificate (a self-sig
 parser.add_argument('--https', action='store_true', help="HTTPS, trusting the system's certificate authorities")
 parser.add_argument('--token', help="a file holding the wall's API token (default: none)")
 ARGS = parser.parse_args()
+if ARGS.logic and ARGS.logic_file:
+   parser.error('give the logic file once, with --logic')
+ARGS.logic = ARGS.logic or ARGS.logic_file
 
 DC_HOST = ARGS.host
 DC_PORT = ARGS.port
@@ -89,8 +98,10 @@ class Wall:
          self.context = ssl.create_default_context(cafile=os.path.expanduser(ARGS.cert) if ARGS.cert else None)
       self.conn = None
 
-   def request(self, method, path, body=None):
+   def request(self, method, path, body=None, lease=None):
       headers = {'Authorization': 'Bearer ' + DC_TOKEN} if DC_TOKEN else {}
+      if lease:
+         headers['X-DC-Lease'] = lease
       data = None
       if body is not None:
          data = json.dumps(body)
@@ -115,6 +126,15 @@ class Wall:
             self.conn = None
             if attempt == 2:
                raise
+
+   def load_state(self, file):
+      """Takes control of the wall, loads a state file and gives control back.
+      Fails if someone else (the web UI, say) has control."""
+      lease = self.request('POST', '/control', {'label': 'manager.py'})['lease']
+      try:
+         self.request('POST', '/state/load', {'file': file}, lease=lease)
+      finally:
+         self.request('DELETE', '/control', lease=lease)
 
    def set_sensors(self, value):
       return self.request('PUT', '/sensors', {'value': value, 'mask': LOGIC.SENSOR_MASK})['value']
@@ -265,6 +285,12 @@ async def main():
                        "and a token if it has one (--token).")
    except (http.client.HTTPException, OSError) as e:
       raise SystemExit(f"Can't reach {scheme}://{DC_HOST}:{DC_PORT}: {e}")
+   if ARGS.state:
+      try:
+         await asyncio.to_thread(wall.load_state, ARGS.state)
+      except RuntimeError as e:
+         raise SystemExit(f"Couldn't load {ARGS.state}: {e}")
+      print(f"Loaded {ARGS.state}")
    print(f"Connected; wall sensor value is {value['value']:0{VALUE_BITS}b}")
    # carry on from the bits the wall has, so a restart doesn't change the images;
    # if the logic changes them (bits outside its range), the sender sends its own
