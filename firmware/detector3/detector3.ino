@@ -221,7 +221,9 @@ void setup() {
 
   BLECharacteristic *pRxCharacteristic = pService->createCharacteristic(
     CHARACTERISTIC_UUID_RX,
-    BLECharacteristic::PROPERTY_WRITE
+    // macOS drops a write without response to a characteristic that doesn't
+    // say it takes one, so accept both
+    BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR
   );
   pRxCharacteristic->setCallbacks(new RxCallbacks());
 

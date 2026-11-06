@@ -42,7 +42,7 @@ async def main():
          else:
             # A state message: ack it so the board doesn't keep resending
             print(f"state {text}")
-            asyncio.create_task(client.write_gatt_char(CHAR_UUID_RX, b"OK", response=False))
+            asyncio.create_task(client.write_gatt_char(CHAR_UUID_RX, b"OK", response=True))
 
       await client.start_notify(CHAR_UUID_TX, notification_handler)
 

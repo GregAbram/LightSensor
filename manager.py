@@ -268,7 +268,7 @@ async def run_once(index):
                    print(f"{tag} sensor {k} (bit {bit}) {lit!r} (was {sensor_state[bit]!r})")
                    sensor_state[bit] = lit
                    changed.set()
-           asyncio.create_task(client.write_gatt_char(CHAR_UUID_RX, b"OK", response=False))
+           asyncio.create_task(client.write_gatt_char(CHAR_UUID_RX, b"OK", response=True))
 
        await client.start_notify(CHAR_UUID_TX, notification_handler)
        clients[index] = client

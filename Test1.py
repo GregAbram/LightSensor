@@ -55,7 +55,7 @@ async def run_once():
                if lit != sensor_state[k]:
                    print(f"   sensor {k}: {'LIT' if lit else 'dark'} (was {sensor_state[k]!r})")
                    sensor_state[k] = lit
-           asyncio.create_task(client.write_gatt_char(CHAR_UUID_RX, b"OK", response=False))
+           asyncio.create_task(client.write_gatt_char(CHAR_UUID_RX, b"OK", response=True))
 
        await client.start_notify(CHAR_UUID_TX, notification_handler)
 

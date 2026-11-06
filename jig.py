@@ -69,7 +69,7 @@ async def run_once(index):
                return
            for k, lit in enumerate(states):
                column_state[index * SENSORS_PER_BOARD + k] = lit
-           asyncio.create_task(client.write_gatt_char(CHAR_UUID_RX, b"OK", response=False))
+           asyncio.create_task(client.write_gatt_char(CHAR_UUID_RX, b"OK", response=True))
 
        await client.start_notify(CHAR_UUID_TX, notification_handler)
 
