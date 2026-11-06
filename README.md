@@ -18,10 +18,13 @@ Board N's sensor k is bit `N * 2 + k` of the sensor value.
 | `threshold-test/` | Serial-only bench test: prints both sensors' raw readings continuously, for picking a threshold. |
 | `threshold-change/` | Serial-only bench test: prints only when a sensor changes. |
 
+[TUNING.md](TUNING.md) explains the threshold and gap, how to choose them, and
+the ways to set them.
+
 Build for **XIAO_ESP32C3** with **USB CDC On Boot: Enabled**, or nothing
 reaches the Serial Monitor.
 
-`detector3` is set up for battery life: an 80 MHz CPU, a reading every 50 ms
+`detector3` is set up for battery life: an 80 MHz CPU, a reading every 30 ms
 with the CPU idle in between, 0 dBm transmit power, slow advertising, and a
 request for a 60-120 ms connection interval with slave latency. The constants
 are together near the top of the sketch. The stock Arduino core is built
@@ -93,8 +96,8 @@ hits.
   `manager.py` starts, counts as a hit.
 - **Bounce:** a flicker across the threshold counts as another hit and leaves the
   wrong image up, and nothing in `manager.py` filters it out. If that happens,
-  widen the gap with `tune.py`.
-- **Very quick hits:** the boards read every 50 ms, and a sensor that goes lit and
+  widen the gap (see [TUNING.md](TUNING.md)).
+- **Very quick hits:** the boards read every 30 ms, and a sensor that goes lit and
   dark again while a request is in flight (about 80 ms) doesn't toggle.
 
 ## `old/`
