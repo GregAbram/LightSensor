@@ -57,6 +57,12 @@ from this one through an SSH tunnel:
 ssh -N -L 1910:localhost:1910 stallion-manager.tacc.utexas.edu
 ```
 
+While `manager.py` runs, commands typed into its window tune the boards over
+the connections it already has, so there's no need to stop it for `tune.py`:
+`1 T2400` sets board 1's threshold, `1 G300` its gap, `all G300` every
+connected board's, and `?` shows them all. The boards save them in flash, and
+each reply prints as `[1:XIAO-ESP32C3-1] settings T2400 G300`.
+
 `--state FILE` loads a state file from the wall's state directory before
 starting (`--state show.dcx`), taking control just for that; it fails if someone
 else, such as the web UI, has control. `--host` and `--port` pick another wall, `--cert FILE` (a self-signed wall's

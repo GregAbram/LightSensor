@@ -27,6 +27,10 @@ wall's token. For rattler-dev:
       --cert ~/.displaycluster/rattler-dev_cert.pem \
       --token ~/.displaycluster/rattler-dev_token
 
+While it runs, commands typed into its window set the boards' thresholds and
+gaps over the connections it has open: '1 T2400', '1 G300', 'all G300', or '?'
+to show them all.
+
 --state FILE loads a state file from the wall's state directory first (e.g.
 --state show.dcx), taking control of the wall just for that.
 
@@ -221,6 +225,9 @@ async def sender(sent):
          await asyncio.sleep(1)
          changed.set()
 
+# Each connected board's BLE client, so typed commands can reach it
+clients = [None] * len(DEVICE_NAMES)
+
 def parse_state(data):
    """Each board reports all its sensors as e.g. '10': '1' = lit, '0' = unlit.
    Returns a list of bools, or None if the message is malformed."""
@@ -264,9 +271,12 @@ async def run_once(index):
            asyncio.create_task(client.write_gatt_char(CHAR_UUID_RX, b"OK", response=False))
 
        await client.start_notify(CHAR_UUID_TX, notification_handler)
-
-       while client.is_connected:
-           await asyncio.sleep(1)
+       clients[index] = client
+       try:
+           while client.is_connected:
+               await asyncio.sleep(1)
+       finally:
+           clients[index] = None
 
        print(f"{tag} Disconnected.")
 
@@ -283,6 +293,68 @@ async def device_loop(index):
        changed.set()
        print(f"[{index}:{DEVICE_NAMES[index]}] Retrying in 3s...")
        await asyncio.sleep(3)
+
+COMMAND_HELP = """Commands (the board saves T and G in flash, as with tune.py):
+   <board> T<n>    set a board's threshold, e.g. 1 T2400
+   <board> G<n>    set its gap, e.g. 1 G300
+   <board> ?       show its threshold and gap
+   all ...         the same for every connected board, e.g. all G300
+   ?               show every connected board's settings"""
+
+def parse_command(line):
+   """A typed line as (boards, commands), or a message saying what's wrong."""
+   words = line.upper().split()
+   if not words:
+      return None
+   if words in (['?'], ['HELP']):
+      return list(range(len(DEVICE_NAMES))), ['?']
+   target, commands = words[0], words[1:] or ['?']
+   if target == 'ALL':
+      boards = list(range(len(DEVICE_NAMES)))
+   elif target.isdigit() and int(target) < len(DEVICE_NAMES):
+      boards = [int(target)]
+   else:
+      return f"no board {words[0]!r}\n{COMMAND_HELP}"
+   for c in commands:
+      if c != '?' and not (c[0] in 'TG' and c[1:].isdigit() and int(c[1:]) <= 4095):
+         return f"bad command {c!r}: use T<n> or G<n> with n from 0 to 4095, or ?"
+   return boards, commands
+
+async def command_loop():
+   """Takes tuning commands typed into this window and sends them to the boards
+   over the connections already open; each board's reply prints as 'settings'."""
+   if not sys.stdin.isatty():
+      return
+   lines = asyncio.Queue()
+   asyncio.get_running_loop().add_reader(sys.stdin, lambda: lines.put_nowait(sys.stdin.readline()))
+   print("Type T/G commands to tune the boards, e.g. '1 T2400' or 'all G300'; '?' for help")
+   while True:
+      line = await lines.get()
+      if line == '':
+         return   # end of input
+      parsed = parse_command(line)
+      if parsed is None:
+         continue
+      if isinstance(parsed, str):
+         print(parsed)
+         continue
+      boards, commands = parsed
+      if len(boards) > 1 and not any(clients):
+         print("no boards connected")
+      for b in boards:
+         client = clients[b]
+         if client is None:
+            if len(boards) == 1:
+               print(f"[{b}:{DEVICE_NAMES[b]}] not connected")
+            continue
+         for c in commands:
+            try:
+               await client.write_gatt_char(CHAR_UUID_RX, c.encode(), response=True)
+            except Exception as e:
+               print(f"[{b}:{DEVICE_NAMES[b]}] couldn't send {c}: {e}")
+               break
+      if line.strip().upper() in ('?', 'HELP'):
+         print(COMMAND_HELP)
 
 async def main():
    scheme = 'https' if wall.context else 'http'
@@ -310,7 +382,7 @@ async def main():
    sent = value['value'] & LOGIC.SENSOR_MASK
    if LOGIC.start(value['value']) != sent:
       changed.set()
-   await asyncio.gather(sender(sent), *(device_loop(i) for i in range(len(DEVICE_NAMES))))
+   await asyncio.gather(sender(sent), command_loop(), *(device_loop(i) for i in range(len(DEVICE_NAMES))))
 
 if __name__ == "__main__":
    try:
