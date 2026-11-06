@@ -14,6 +14,7 @@ Board N's sensor k is bit `N * 2 + k` of the sensor value.
 | Sketch | |
 |---|---|
 | `detector3/` | The board firmware. Sensors on GPIO2 and GPIO4, read as analog against a threshold and gap that are set over BLE or serial (`T<n>`, `G<n>`, `?`) and kept in flash. Set `BOARD_INDEX` (0-2) before flashing each board; it advertises as `XIAO-ESP32C3-<n>`. |
+| `sensor-jig/` | Serial-only tuning jig for one sensor: every quarter second prints its light reading and lit/dark state, with detector3's reading and hysteresis. Takes `T<n>`, `G<n>`, `?`, and `S0`/`S1` to switch sensors. Saves threshold and gap where detector3 reads them, so reflashing detector3 keeps the tuned values. Set `BOARD_INDEX` and `SENSOR` to label and start it. |
 | `threshold-test/` | Serial-only bench test: prints both sensors' raw readings continuously, for picking a threshold. |
 | `threshold-change/` | Serial-only bench test: prints only when a sensor changes. |
 
