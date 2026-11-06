@@ -20,6 +20,12 @@
 // A sensor turns lit when its light reading rises above the threshold, and
 // dark again only when it falls below threshold - gap (hysteresis).
 
+// Without USB CDC On Boot, Serial is the UART pins, and nothing reaches the
+// Serial Monitor over USB
+#if !ARDUINO_USB_CDC_ON_BOOT
+#error "Set Tools > USB CDC On Boot: Enabled, or nothing reaches the Serial Monitor"
+#endif
+
 // The board and sensor to start with. The board number only labels the output.
 #define BOARD_INDEX 0
 #define SENSOR 0
